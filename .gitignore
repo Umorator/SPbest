@@ -1,0 +1,97 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Output directories
+outputs/
+*.csv
+*.pkl
+*.json
+!config.json
+!configs/*.json
+!requirements.txt
+!environment.yml
+
+# Models and predictions
+models/
+predictions/
+*.model
+
+# Figures and plots
+figures/
+*.png
+*.jpg
+*.jpeg
+*.pdf
+*.svg
+
+# Jupyter notebooks (if any)
+.ipynb_checkpoints/
+*.ipynb
+
+# Virtual environments
+venv/
+env/
+.env
+.venv
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Unit test / coverage
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# Conda environment
+environment.yaml
+*.bak
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Keep only python files and configs
+!*.py
+!config.json
+!configs/*.json
+!README.md
+!requirements.txt
+!environment.yml
+!LICENSE

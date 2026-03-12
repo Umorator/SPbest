@@ -1,0 +1,8 @@
+{
+  "csv_path": "outputs/CoSMPAD_autor_ref.csv",
+  "labeled_data": "outputs/labeled.csv",
+  "cluster_file": "outputs/protein_cluster_assignments.csv",
+  "fold_output": "outputs/folds/",
+  "plot": true,
+  "pnu_mode": true
+}
