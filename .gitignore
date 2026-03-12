@@ -15,11 +15,6 @@ outputs/
 !requirements.txt
 !environment.yml
 
-# Models and predictions
-models/
-predictions/
-*.model
-
 # Figures and plots
 figures/
 *.png

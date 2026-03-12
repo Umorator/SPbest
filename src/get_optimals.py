@@ -23,11 +23,12 @@ def get_optimals(config_path: str, plot: bool = True, pnu_mode: bool = False):
     - If all enzyme_activity numeric: label 1 if > group mean, else 0.
     - If non-numeric present: numerics=1, non-numerics=0.
     - Special cases:
-        * 'Khadye - E7FHY4': specific SPs labeled as 1
+        * 'Khadye - E7FHY4': specific SPs labeled as 1 (even if non-numeric)
         * 'Ying - EF634454.1': all entries labeled 1
     - In PNU mode:
         * If enzyme_activity is numeric -> label_PNU = label (0 or 1)
         * If enzyme_activity is non-numeric (missing/string) -> label_PNU = -1 (unlabeled)
+        * EXCEPT for Khadye special SPs: these are ALWAYS positive (label_PNU=1) even if non-numeric
     """
 
     # Load config
@@ -48,7 +49,7 @@ def get_optimals(config_path: str, plot: bool = True, pnu_mode: bool = False):
             raise ValueError(f"Missing required column: {col}")
 
     # Special SPs for Khadye
-    khadye_sps = ['cith','lytb','ywsb','ybdg','phob','Abna','ykoj','ykwd','yobv','ybbe','ywad','apre']
+    khadye_sps = ['cith','lytb','ywsb','ybdg','phob','abna','ykoj','ykwd','yobv','ybbe','ywad','apre']
 
     def label_group(group_df):
         """Apply labeling rules per Author-Protein group."""
@@ -74,12 +75,16 @@ def get_optimals(config_path: str, plot: bool = True, pnu_mode: bool = False):
         # First, check if enzyme_activity is numeric
         df['is_numeric'] = pd.to_numeric(df['enzyme_activity'], errors='coerce').notna()
         
-        # label_PNU: 1 if positive (optimal and numeric), 0 if negative (non-optimal and numeric), -1 if unlabeled (non-numeric)
+        # Default rule: if numeric -> use label, if non-numeric -> -1
         df['label_PNU'] = np.where(
-            df['is_numeric'],  # If numeric
-            df['label'],        # Use the original label (0 or 1)
-            -1                  # If non-numeric, it's unlabeled
+            df['is_numeric'],
+            df['label'],
+            -1
         )
+        
+        # SPECIAL CASE: Khadye specific SPs are always positive (1) even if non-numeric
+        khadye_mask = (df['Author-Protein'] == 'Khadye - E7FHY4') & (df['SP name'].isin(khadye_sps))
+        df.loc[khadye_mask, 'label_PNU'] = 1
         
         # Drop temporary column
         df = df.drop('is_numeric', axis=1)
@@ -89,6 +94,12 @@ def get_optimals(config_path: str, plot: bool = True, pnu_mode: bool = False):
         print(f"  Negatives (label_PNU=0): {(df['label_PNU'] == 0).sum()}")
         print(f"  Unlabeled (label_PNU=-1): {(df['label_PNU'] == -1).sum()}")
         print(f"  Total: {len(df)}")
+        
+        # Show Khadye special cases
+        khadye_pos = df[(df['Author-Protein'] == 'Khadye - E7FHY4') & (df['SP name'].isin(khadye_sps))]
+        print(f"\nKhadye special SPs (all set to 1): {len(khadye_pos)}")
+        if len(khadye_pos) > 0:
+            print(f"  Examples: {khadye_pos['SP name'].tolist()}")
 
     if plot:
         plot_distribution(df, pnu_mode)
