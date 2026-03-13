@@ -5,6 +5,14 @@
   "n_folds": 5,
   "plot": false,
   "pnu_mode": true,
+  
+  "include_sp_seq": true,
+  "sp_seq_file": "outputs/features/SP_features_probabilities_full.csv",
+  
+  "random_undersampling": true,
+  "target_ratio": 3.0,
+  "random_seed": 42,
+  
   "xgboost_params": {
     "learning_rate": 0.05,
     "max_depth": 8,

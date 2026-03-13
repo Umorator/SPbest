@@ -342,6 +342,13 @@ class WeightedPUClassifier:
 def load_and_prepare_data(config_file, use_pnu=True):
     """
     Load data from config file, optionally using get_optimals for labeling
+    
+    Config parameters that affect this function:
+    - random_undersampling: bool (default: False) - Whether to apply random undersampling
+    - target_ratio: float (default: 3.0) - Target ratio of unlabeled:positive samples
+    - random_seed: int (default: 42) - Random seed for reproducibility
+    - include_sp_seq: bool (default: False) - Whether to include SP sequence features
+    - sp_seq_file: str - Path to SP sequence features file (required if include_sp_seq=True)
     """
     with open(config_file) as f:
         cfg = json.load(f)
@@ -363,7 +370,7 @@ def load_and_prepare_data(config_file, use_pnu=True):
         labeled_path = cfg.get("labeled_data", "outputs/labeled.csv")
         print(f"\nLoading pre-labeled data from: {labeled_path}")
         df_labels = pd.read_csv(labeled_path)
-        
+    
     # Load features and clusters
     print(f"Loading features from: {cfg['features_file']}")
     df_features = pd.read_csv(cfg["features_file"])
@@ -371,9 +378,151 @@ def load_and_prepare_data(config_file, use_pnu=True):
     print(f"Loading clusters from: {cfg['cluster_file']}")
     df_clusters = pd.read_csv(cfg["cluster_file"])
     
-    # Merge
+    # Merge labels with features and clusters
     df = df_labels.merge(df_features, on="id").merge(df_clusters, on="Author-Protein")
+    
+    # Track feature columns
     feature_cols = [c for c in df_features.columns if c != "id"]
+    
+    # Check if we should include SP sequence features
+    include_sp_seq = cfg.get("include_sp_seq", False)
+    
+    if include_sp_seq:
+        sp_seq_file = cfg.get("sp_seq_file")
+        if sp_seq_file is None:
+            raise ValueError("include_sp_seq=True but no sp_seq_file provided in config")
+        
+        print(f"\nLoading SP sequence features from: {sp_seq_file}")
+        df_sp_seq = pd.read_csv(sp_seq_file)
+        
+        # Verify the SP sequence file has an 'id' column for merging
+        if 'id' not in df_sp_seq.columns:
+            raise ValueError(f"SP sequence file {sp_seq_file} must contain an 'id' column")
+        
+        # Get SP feature columns (excluding 'id')
+        sp_feature_cols = [c for c in df_sp_seq.columns if c != "id"]
+        
+        print(f"  Found {len(sp_feature_cols)} SP sequence features")
+        print(f"  SP features: {sp_feature_cols[:5]}{'...' if len(sp_feature_cols) > 5 else ''}")
+        
+        # Merge SP sequence features
+        original_len = len(df)
+        df = df.merge(df_sp_seq, on="id", how="left")
+        
+        # Check if any IDs didn't have SP features
+        merged_len = len(df)
+        if merged_len != original_len:
+            print(f"  Warning: Merge changed dataframe size from {original_len} to {merged_len}")
+        
+        # Check for missing SP features
+        missing_sp = df[sp_feature_cols].isnull().any(axis=1).sum()
+        if missing_sp > 0:
+            print(f"  Warning: {missing_sp} rows ({missing_sp/len(df)*100:.1f}%) have missing SP sequence features")
+        
+        # Add SP features to feature_cols
+        feature_cols.extend(sp_feature_cols)
+        print(f"  Added {len(sp_feature_cols)} SP sequence features to feature set")
+    else:
+        print("\nSkipping SP sequence features (include_sp_seq=False)")
+    
+    # Check if random undersampling is enabled in config
+    random_undersampling = cfg.get("random_undersampling", False)
+    
+    if random_undersampling:
+        # Get parameters from config with defaults
+        target_ratio = cfg.get("target_ratio", 3.0)  # Default 1:3 positive:unlabeled
+        random_seed = cfg.get("random_seed", 42)
+        
+        print("\n" + "="*60)
+        print(f"APPLYING RANDOM UNDERSAMPLING FOR UNLABELED DATA")
+        print(f"Target ratio: 1:{target_ratio} (positive:unlabeled)")
+        print(f"Random seed: {random_seed}")
+        print("="*60)
+        
+        # Make sure we're working with PNU labels
+        if 'label_PNU' not in df.columns:
+            print("Warning: label_PNU column not found. Using 'label' column instead.")
+            df['label_PNU'] = df['label']  # Fallback
+        
+        # Store original counts
+        original_total = len(df)
+        original_pos = (df['label_PNU'] == 1).sum()
+        original_neg = (df['label_PNU'] == 0).sum()
+        original_unlabeled = (df['label_PNU'] == -1).sum()
+        
+        print(f"\nOriginal data distribution:")
+        print(f"  Positives (label_PNU=1): {original_pos}")
+        print(f"  Negatives (label_PNU=0): {original_neg}")
+        print(f"  Unlabeled (label_PNU=-1): {original_unlabeled}")
+        print(f"  Total: {original_total}")
+        
+        # Initialize list to store sampled dataframes per group
+        sampled_dfs = []
+        
+        # Group by 'Author-Protein'
+        for group_name, group_df in df.groupby('Author-Protein'):
+            # Split group into positive, negative, and unlabeled
+            positives = group_df[group_df['label_PNU'] == 1]
+            negatives = group_df[group_df['label_PNU'] == 0]
+            unlabeled = group_df[group_df['label_PNU'] == -1]
+            
+            # Calculate target unlabeled count (target_ratio × positives)
+            target_unlabeled = int(len(positives) * target_ratio)
+            
+            # If we have more unlabeled than target, undersample
+            if len(unlabeled) > target_unlabeled:
+                unlabeled_sampled = unlabeled.sample(n=target_unlabeled, random_state=random_seed)
+                print(f"\nGroup '{group_name}':")
+                print(f"  Positives: {len(positives)}")
+                print(f"  Unlabeled original: {len(unlabeled)} -> sampled: {target_unlabeled} (ratio 1:{target_unlabeled/len(positives) if len(positives) > 0 else 0:.1f})")
+            else:
+                # Keep all unlabeled if we don't have enough
+                unlabeled_sampled = unlabeled
+                if len(positives) > 0:
+                    actual_ratio = len(unlabeled) / len(positives) if len(positives) > 0 else 0
+                    print(f"\nGroup '{group_name}':")
+                    print(f"  Positives: {len(positives)}")
+                    print(f"  Unlabeled: {len(unlabeled)} (keeping all - actual ratio 1:{actual_ratio:.1f})")
+                else:
+                    print(f"\nGroup '{group_name}': No positives, keeping all {len(unlabeled)} unlabeled samples")
+            
+            # Combine positives, negatives (keep all), and sampled unlabeled
+            sampled_group = pd.concat([positives, negatives, unlabeled_sampled])
+            sampled_dfs.append(sampled_group)
+        
+        # Combine all sampled groups
+        df_sampled = pd.concat(sampled_dfs, ignore_index=True)
+        
+        # Print final statistics
+        final_pos = (df_sampled['label_PNU'] == 1).sum()
+        final_neg = (df_sampled['label_PNU'] == 0).sum()
+        final_unlabeled = (df_sampled['label_PNU'] == -1).sum()
+        final_total = len(df_sampled)
+        
+        print("\n" + "-"*40)
+        print("FINAL DATA DISTRIBUTION AFTER UNDERSAMPLING:")
+        print("-"*40)
+        print(f"  Positives (label_PNU=1): {final_pos}")
+        print(f"  Negatives (label_PNU=0): {final_neg}")
+        print(f"  Unlabeled (label_PNU=-1): {final_unlabeled}")
+        print(f"  Total: {final_total}")
+        
+        if final_pos > 0:
+            print(f"  Positive:Unlabeled ratio: 1:{final_unlabeled/final_pos:.2f} (target: 1:{target_ratio})")
+            print(f"  Reduction in unlabeled samples: {original_unlabeled - final_unlabeled} ({((original_unlabeled - final_unlabeled)/original_unlabeled*100):.1f}% reduction)")
+        
+        if final_neg > 0 and final_pos > 0:
+            print(f"  Positive:Negative ratio: 1:{final_neg/final_pos:.2f}")
+        
+        # Replace original df with sampled version
+        df = df_sampled
+    else:
+        print("\n" + "="*60)
+        print("SKIPPING RANDOM UNDERSAMPLING (disabled in config)")
+        print("="*60)
+        print(f"Using all data: {len(df)} total samples")
+    
+    print(f"\n📊 Final dataset: {len(df)} samples with {len(feature_cols)} features")
     
     return df, feature_cols, cfg
 
