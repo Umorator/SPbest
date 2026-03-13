@@ -73,8 +73,8 @@ class WeightedPUClassifier:
         
         # Use simpler model to avoid overfitting
         temp_model = xgb.XGBClassifier(
-            n_estimators=100,
-            max_depth=4,
+            n_estimators=500,
+            max_depth=8,
             learning_rate=0.1,
             random_state=self.random_state,
             verbosity=0,
@@ -344,43 +344,43 @@ class WeightedPUClassifier:
         return importance_df
 
 
-    def load_and_prepare_data(config_file, use_pnu=True):
-        """
-        Load data from config file, optionally using get_optimals for labeling
-        """
-        with open(config_file) as f:
-            cfg = json.load(f)
+def load_and_prepare_data(config_file, use_pnu=True):
+    """
+    Load data from config file, optionally using get_optimals for labeling
+    """
+    with open(config_file) as f:
+        cfg = json.load(f)
+    
+    if use_pnu:
+        print("\nGenerating labels using get_optimals with PNU mode...")
+        # Use get_optimals to generate labels
+        df_labels = get_optimals(
+            config_file, 
+            plot=cfg.get("plot", False), 
+            pnu_mode=True
+        )
+        # Save the labeled data with a default name
+        labeled_path = "outputs/labeled.csv"
+        df_labels.to_csv(labeled_path, index=False)
+        print(f"Labels saved to: {labeled_path}")
+    else:
+        # Load pre-labeled data (if you ever need it)
+        labeled_path = cfg.get("labeled_data", "outputs/labeled.csv")
+        print(f"\nLoading pre-labeled data from: {labeled_path}")
+        df_labels = pd.read_csv(labeled_path)
         
-        if use_pnu:
-            print("\nGenerating labels using get_optimals with PNU mode...")
-            # Use get_optimals to generate labels
-            df_labels = get_optimals(
-                config_file, 
-                plot=cfg.get("plot", False), 
-                pnu_mode=True
-            )
-            # Save the labeled data with a default name
-            labeled_path = "outputs/labeled.csv"
-            df_labels.to_csv(labeled_path, index=False)
-            print(f"Labels saved to: {labeled_path}")
-        else:
-            # Load pre-labeled data (if you ever need it)
-            labeled_path = cfg.get("labeled_data", "outputs/labeled.csv")
-            print(f"\nLoading pre-labeled data from: {labeled_path}")
-            df_labels = pd.read_csv(labeled_path)
-            
-        # Load features and clusters
-        print(f"Loading features from: {cfg['features_file']}")
-        df_features = pd.read_csv(cfg["features_file"])
-        
-        print(f"Loading clusters from: {cfg['cluster_file']}")
-        df_clusters = pd.read_csv(cfg["cluster_file"])
-        
-        # Merge
-        df = df_labels.merge(df_features, on="id").merge(df_clusters, on="Author-Protein")
-        feature_cols = [c for c in df_features.columns if c != "id"]
-        
-        return df, feature_cols, cfg
+    # Load features and clusters
+    print(f"Loading features from: {cfg['features_file']}")
+    df_features = pd.read_csv(cfg["features_file"])
+    
+    print(f"Loading clusters from: {cfg['cluster_file']}")
+    df_clusters = pd.read_csv(cfg["cluster_file"])
+    
+    # Merge
+    df = df_labels.merge(df_features, on="id").merge(df_clusters, on="Author-Protein")
+    feature_cols = [c for c in df_features.columns if c != "id"]
+    
+    return df, feature_cols, cfg
 
 
 def create_cluster_folds(df, n_folds=5):
