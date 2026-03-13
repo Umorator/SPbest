@@ -179,8 +179,7 @@ def main():
     # Load data with undersampling to achieve 1:3 positive:unlabeled ratio
     df, feature_cols, cfg = load_and_prepare_data(
         args.config, 
-        use_pnu=args.use_pnu,
-        pos_unlabeled_ratio=1/3  # 1:3 ratio
+        use_pnu=args.use_pnu
     )
     n_folds = cfg.get("n_folds", 5)
     xgb_params = cfg.get("xgboost_params", {})
