@@ -260,10 +260,7 @@ df_all = pd.concat([df_all, df_khadye], ignore_index=True)
 print(f"\nTotal rows after Khadye merge: {len(df_all)}")
 
 # ==========================================================
-# --- NOW CREATE THE PLOT (ALL PROCESSING DONE) ---
-# ==========================================================
-# ==========================================================
-# --- NOW CREATE THE PLOT (ALL PROCESSING DONE) ---
+# --- CREATE THE PLOT (ALL PROCESSING DONE) ---
 # ==========================================================
 print("\n" + "="*60)
 print("CREATING VISUALIZATION")
@@ -371,7 +368,7 @@ if activity_columns:
     plt.tight_layout()
     
     # Save high-resolution figure
-    plt.savefig('enzyme_activity_distribution.png', dpi=300, bbox_inches='tight', format='png', transparent=False)
+    plt.savefig('measured_SP_distribution.png', dpi=300, bbox_inches='tight', format='png', transparent=False)
     print("\nPlots saved as:")
     print("  - enzyme_activity_distribution.pdf (vector format)")
     print("  - enzyme_activity_distribution.png (raster format, 300 DPI)")
