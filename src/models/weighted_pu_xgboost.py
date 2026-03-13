@@ -31,18 +31,16 @@ class WeightedPUClassifier:
     def estimate_prior(self, X_pos, X_neg, X_unlabeled, df_train=None):
         """
         Step 1: Estimate the proportion of positives in unlabeled data
-        with protein group size weighting
+        using Elkan-Noto method with protein group size weighting
+        
+        The Elkan-Noto estimator: alpha = mean(p_unlabeled) / mean(p_positives)
+        where p_positives are predictions on known positive examples
         """
-        print("  Estimating prior (alpha)...")
+        print("  Estimating prior (alpha) using Elkan-Noto method...")
         
         # Combine known data
         X_known = np.vstack([X_pos, X_neg])
         y_known = np.array([1]*len(X_pos) + [0]*len(X_neg))
-        
-        # Check if we have enough data
-        if len(X_known) < 10 or len(X_unlabeled) == 0:
-            print("  Warning: Not enough data for prior estimation, using default 0.3")
-            return 0.3
         
         # Create protein weights for known data if df_train provided
         sample_weights = None
@@ -87,37 +85,34 @@ class WeightedPUClassifier:
             if sample_weights is not None:
                 temp_model.fit(X_known, y_known, sample_weight=sample_weights)
             else:
-                # Use sampling if no weights
-                n_samples = min(1000, len(X_known))
-                indices = np.random.choice(len(X_known), n_samples, replace=False)
-                X_sample = X_known[indices]
-                y_sample = y_known[indices]
-                temp_model.fit(X_sample, y_sample)
+                temp_model.fit(X_known, y_known)
             
-            # Predict on unlabeled
+            # Get predictions on known positives (for calibration)
+            pos_probs = temp_model.predict_proba(X_pos)[:, 1]
+            mean_pos_prob = np.mean(pos_probs)
+            
+            # Get predictions on unlabeled data
             unlabeled_probs = temp_model.predict_proba(X_unlabeled)[:, 1]
+            mean_unlabeled_prob = np.mean(unlabeled_probs)
             
-            # Method 1: Mean probability
-            alpha_mean = np.mean(unlabeled_probs)
-            
-            # Method 2: Proportion above 0.5
-            alpha_high = np.mean(unlabeled_probs > 0.5)
-            
-            # Method 3: Use the known positive ratio as a prior
-            positive_ratio = len(X_pos) / (len(X_pos) + len(X_neg))
-            
-            # Combine methods (weighted average)
-            alpha = 0.5 * alpha_mean + 0.3 * alpha_high + 0.2 * positive_ratio
+            # Elkan-Noto estimator: alpha = mean(unlabeled) / mean(positives)
+            # This corrects for classifier bias
+            if mean_pos_prob > 0:
+                raw_alpha = mean_unlabeled_prob / mean_pos_prob
+            else:
+                print("    Warning: Mean positive probability is zero, using fallback")
+                raw_alpha = mean_unlabeled_prob
             
             # Store raw alpha before clipping
-            self.raw_alpha = alpha
+            self.raw_alpha = raw_alpha
             
-            # More reasonable clipping: allow up to 0.8
-            alpha = np.clip(alpha, 0.05, 0.8)
+            # Apply reasonable bounds
+            alpha = np.clip(raw_alpha, 0.01, 0.99)
             
-            print(f"  Raw alpha (before clip): {self.raw_alpha:.3f}")
+            print(f"  Mean prob on positives: {mean_pos_prob:.3f}")
+            print(f"  Mean prob on unlabeled: {mean_unlabeled_prob:.3f}")
+            print(f"  Raw alpha (unlabeled/positives): {raw_alpha:.3f}")
             print(f"  Clipped alpha: {alpha:.3f}")
-            print(f"  Component alphas - Mean: {alpha_mean:.3f}, High: {alpha_high:.3f}, Prior: {positive_ratio:.3f}")
             
         except Exception as e:
             print(f"  Prior estimation failed: {e}, using default 0.3")
