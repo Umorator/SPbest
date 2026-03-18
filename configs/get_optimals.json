@@ -1,8 +1,21 @@
 {
   "csv_path": "outputs/CoSMPAD_autor_ref.csv",
+  "sp_seq": "outputs/features/SP_features_probabilities_full.csv",
+  "Preprotein_seq": "outputs/features/Preprotein50_features_only_full.csv",
   "labeled_data": "outputs/labeled.csv",
   "cluster_file": "outputs/protein_cluster_assignments.csv",
   "fold_output": "outputs/folds/",
+  "pairs_path": "outputs/ranking_pairs.csv",
+  "models_dir": "models/",
   "plot": true,
-  "pnu_mode": true
+  "pnu_mode": true,
+  "add_sp": true,
+  "training": {
+    "batch_size": 64,
+    "epochs": 50,
+    "learning_rate": 0.001,
+    "hidden_layers": [256, 128, 64],
+    "dropout": 0.3,
+    "patience": 10
+  }
 }
