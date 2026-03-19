@@ -1,0 +1,20 @@
+{
+  "csv_path": "outputs/CoSMPAD_autor_ref.csv",
+  "protein_features_file": "outputs/features/Protein_features_only_full.csv",
+  "sp_features_file": "outputs/features/SP_features_probabilities_full.csv",
+  "cluster_file": "outputs/protein_cluster_assignments.csv",
+  "n_folds": 5,
+  "plot": false,
+  "pnu_mode": true,
+  "create_interactions": true,
+  "xgboost_params": {
+    "learning_rate": 0.05,
+    "max_depth": 8,
+    "n_estimators": 500,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "min_child_weight": 3,
+    "reg_alpha": 0.1,
+    "reg_lambda": 1
+  }
+}
