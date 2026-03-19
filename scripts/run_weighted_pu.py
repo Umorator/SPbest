@@ -17,12 +17,11 @@ from datetime import datetime
 # Add src to path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-from src.models.weighted_pu_xgboost import (
-    WeightedPUClassifier, 
+from src.models.weighted_pu_xgboost import (  # This path is correct
+    XGBRanker,
     load_and_prepare_data, 
     create_cluster_folds,
-    evaluate_predictions,
-    split_pu_data
+    evaluate_ranking,
 )
 
 

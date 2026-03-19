@@ -12,8 +12,8 @@ from sklearn.model_selection import KFold
 import warnings
 warnings.filterwarnings('ignore')
 
-# Import get_optimals from the same src directory
-from src.get_optimals import get_optimals
+# Import get_optimals_continuous from the same src directory
+from src.get_optimals_continuous import get_optimals as get_optimals_continuous
 
 import pandas as pd
 import numpy as np
@@ -121,185 +121,142 @@ class XGBRanker:
         return df
 
 
-def load_and_prepare_data(config_file, use_pnu=True, create_interactions=True):
-    """
-    Load data from config file with separate protein and SP feature files
-    get_optimals already provides the DataFrame with id and Author-Protein
-    """
+def load_and_prepare_data(config_file,
+                         use_pnu=True,
+                         create_interactions=True,
+                         use_continuous_relevance=True,
+                         max_features=1000):
+
+    np.random.seed(42)
+
     with open(config_file) as f:
         cfg = json.load(f)
-    
-    # Generate labels using get_optimals (this returns df with id, Author-Protein, labels)
-    print("\nGenerating labels using get_optimals with PNU mode...")
-    df_labels = get_optimals(
-        config_file, 
-        plot=cfg.get("plot", False), 
-        pnu_mode=True
+
+    # ===== LABELS =====
+    print("\n🔬 Generating labels...")
+    df_labels = get_optimals_continuous(
+        config_file,
+        plot=cfg.get("plot", False),
+        pnu_mode=use_pnu,
+        use_continuous_relevance=use_continuous_relevance
     )
-    
-    print(f"\n📊 Labels DataFrame shape: {df_labels.shape}")
-    print(f"  Columns: {df_labels.columns.tolist()}")
-    print(f"  Unique proteins: {df_labels['Author-Protein'].nunique()}")
-    
-    # Load protein features (these have 'id' column)
-    print(f"\nLoading protein features from: {cfg['protein_features_file']}")
+
+    # ===== LOAD FEATURES =====
     df_prot_features = pd.read_csv(cfg["protein_features_file"])
-    print(f"  Protein features shape: {df_prot_features.shape}")
-    print(f"  Protein features columns: {df_prot_features.columns.tolist()[:5]}...")
-    
-    # Load SP features (these have 'id' column)
-    print(f"Loading SP features from: {cfg['sp_features_file']}")
     df_sp_features = pd.read_csv(cfg["sp_features_file"])
-    print(f"  SP features shape: {df_sp_features.shape}")
-    print(f"  SP features columns: {df_sp_features.columns.tolist()[:5]}...")
-    
-    # Load clusters
-    print(f"Loading clusters from: {cfg['cluster_file']}")
     df_clusters = pd.read_csv(cfg["cluster_file"])
-    print(f"  Clusters shape: {df_clusters.shape}")
-    
-    # Step 1: Merge labels with SP features (on 'id')
+
+    # ===== MERGE =====
     print("\n🔗 Merging data...")
     df = df_labels.merge(df_sp_features, on='id', how='left')
-    print(f"  After SP features merge: {df.shape}")
-    
-    # Step 2: Merge with protein features (on 'id')
     df = df.merge(df_prot_features, on='id', how='left', suffixes=('_sp', '_prot'))
-    print(f"  After protein features merge: {df.shape}")
-    
-    # Identify feature columns
-    # SP feature columns (from SP features file, excluding 'id')
-    sp_feature_cols = [c for c in df_sp_features.columns if c != 'id']
-    # Make sure they exist in df
-    sp_feature_cols = [c for c in sp_feature_cols if c in df.columns]
-    
-    # Protein feature columns (from protein features file, excluding 'id')
-    prot_feature_cols = [c for c in df_prot_features.columns if c != 'id']
-    # Make sure they exist in df
-    prot_feature_cols = [c for c in prot_feature_cols if c in df.columns]
-    
-    print(f"\n📊 Feature dimensions:")
-    print(f"  SP features: {len(sp_feature_cols)}")
-    print(f"  Protein features: {len(prot_feature_cols)}")
-    
-    # Create relevance column for ranking
-    if 'label_PNU' in df.columns:
-        df['relevance'] = (df['label_PNU'] == 1).astype(int)
-        print(f"\n📋 Ranking Relevance Distribution:")
-        print(f"  ✅ Relevant (positives): {df['relevance'].sum()}")
-        print(f"  ❌ Non-relevant: {(df['relevance'] == 0).sum()}")
-    
-    # ===== IDENTIFY PROBA COLUMNS IN SP FEATURES =====
-    proba_cols = [col for col in sp_feature_cols if '_proba' in col or col.endswith('_proba')]
-    non_proba_sp_cols = [col for col in sp_feature_cols if col not in proba_cols]
-    
-    print(f"\n📊 SP Feature breakdown:")
-    print(f"  Regular SP features: {len(non_proba_sp_cols)}")
-    print(f"  Probability features: {len(proba_cols)}")
-    if proba_cols:
-        print(f"  Examples: {proba_cols[:5]}")
-    
-    # ===== CREATE INTERACTION FEATURES =====
-    if create_interactions and len(prot_feature_cols) > 0 and len(non_proba_sp_cols) > 0:
-        print("\n🔄 Creating protein-SP interaction features...")
-        
-        # Find matching features (same name between protein and SP)
-        # Features might have suffixes now (_prot and _sp), so we need to match base names
-        prot_base_names = [col.replace('_prot', '') for col in prot_feature_cols]
-        sp_base_names = [col.replace('_sp', '') for col in non_proba_sp_cols]
-        
-        # Find common base feature names
-        common_features = set(prot_base_names).intersection(set(sp_base_names))
-        print(f"  Found {len(common_features)} common feature types")
-        
-        interaction_features = []
-        
-        for base_name in common_features:
-            prot_col = f"{base_name}_prot" if f"{base_name}_prot" in df.columns else base_name
-            sp_col = f"{base_name}_sp" if f"{base_name}_sp" in df.columns else base_name
-            
-            if prot_col in df.columns and sp_col in df.columns:
-                print(f"    Creating interactions for: {base_name}")
-                
-                # 1. Product (multiplicative interaction)
-                df[f'interact_{base_name}_product'] = df[prot_col] * df[sp_col]
-                interaction_features.append(f'interact_{base_name}_product')
-                
-                # 2. Absolute difference
-                df[f'interact_{base_name}_diff'] = np.abs(df[prot_col] - df[sp_col])
-                interaction_features.append(f'interact_{base_name}_diff')
-                
-                # 3. Sum (additive)
-                df[f'interact_{base_name}_sum'] = df[prot_col] + df[sp_col]
-                interaction_features.append(f'interact_{base_name}_sum')
-                
-                # 4. Ratio (with epsilon to avoid division by zero)
-                epsilon = 1e-8
-                df[f'interact_{base_name}_ratio'] = df[prot_col] / (df[sp_col] + epsilon)
-                interaction_features.append(f'interact_{base_name}_ratio')
-        
-        # Also create some global similarity metrics
-        print("\n  Creating global similarity metrics...")
-        
-        # Get all matching feature pairs as matrices
-        common_list = list(common_features)
-        if len(common_list) > 0:
-            prot_matrix = np.column_stack([
-                df[f"{name}_prot"] if f"{name}_prot" in df.columns else df[name] 
-                for name in common_list
-            ])
-            sp_matrix = np.column_stack([
-                df[f"{name}_sp"] if f"{name}_sp" in df.columns else df[name] 
-                for name in common_list
-            ])
-            
-            # Cosine similarity across all features
-            prot_norm = prot_matrix / (np.linalg.norm(prot_matrix, axis=1, keepdims=True) + 1e-8)
-            sp_norm = sp_matrix / (np.linalg.norm(sp_matrix, axis=1, keepdims=True) + 1e-8)
-            df['global_cosine_similarity'] = np.sum(prot_norm * sp_norm, axis=1)
-            interaction_features.append('global_cosine_similarity')
-            
-            # Euclidean distance
-            df['global_euclidean_distance'] = -np.linalg.norm(prot_matrix - sp_matrix, axis=1)
-            interaction_features.append('global_euclidean_distance')
-        
-        print(f"\n  Created {len(interaction_features)} interaction features")
-        
-        # Update feature columns
-        all_feature_cols = (proba_cols +  # Keep probability features separate
-                          non_proba_sp_cols +  # Original SP features
-                          interaction_features)  # New interaction features
-        
-        print(f"\n📊 Final feature composition:")
-        print(f"  Probability features: {len(proba_cols)}")
-        print(f"  Original SP features: {len(non_proba_sp_cols)}")
-        print(f"  Interaction features: {len(interaction_features)}")
-        print(f"  Total features: {len(all_feature_cols)}")
-        
-    else:
-        # If not creating interactions, just use SP features with proba cols separate
-        all_feature_cols = proba_cols + non_proba_sp_cols if create_interactions else sp_feature_cols
-    
-    # Step 3: Merge with clusters (using Author-Protein)
-    df = df.merge(df_clusters, on='Author-Protein', how='left')
-    print(f"  After clusters merge: {df.shape}")
-    
-    # Remove any constant features
-    print("\n🧹 Cleaning features...")
-    initial_feat_count = len(all_feature_cols)
-    valid_feats = []
-    
-    for col in all_feature_cols:
-        if col in df.columns:
-            # Check if column has any variation
-            if df[col].nunique() > 1:
-                valid_feats.append(col)
-    
-    all_feature_cols = valid_feats
-    print(f"  Kept {len(all_feature_cols)}/{initial_feat_count} features")
-    
-    return df, all_feature_cols, cfg
 
+    # ===== FEATURE GROUPS =====
+    sp_feature_cols = [c for c in df_sp_features.columns if c != 'id' and c in df.columns]
+    prot_feature_cols = [c for c in df_prot_features.columns if c != 'id' and c in df.columns]
+
+    proba_cols = [c for c in sp_feature_cols if '_proba' in c or c.endswith('_proba')]
+    non_proba_sp_cols = [c for c in sp_feature_cols if c not in proba_cols]
+
+    # ===== INTERACTIONS =====
+    interaction_features = []
+
+    if create_interactions and prot_feature_cols and non_proba_sp_cols:
+        print("\n🔄 Creating interaction features...")
+
+        prot_base = [c.replace('protein_', '') for c in prot_feature_cols]
+        sp_base = [c.replace('sp_', '') for c in non_proba_sp_cols]
+        common = set(prot_base).intersection(sp_base)
+
+        for name in common:
+            p_col = f"protein_{name}"
+            s_col = f"sp_{name}"
+
+            if p_col in df.columns and s_col in df.columns:
+                df[f'interact_{name}_product'] = df[p_col] * df[s_col]
+                df[f'interact_{name}_diff'] = np.abs(df[p_col] - df[s_col])
+                df[f'interact_{name}_sum'] = df[p_col] + df[s_col]
+                df[f'interact_{name}_ratio'] = df[p_col] / (df[s_col] + 1e-8)
+
+                interaction_features += [
+                    f'interact_{name}_product',
+                    f'interact_{name}_diff',
+                    f'interact_{name}_sum',
+                    f'interact_{name}_ratio'
+                ]
+
+        if common:
+            prot_mat = np.column_stack([df[f"protein_{n}"] for n in common])
+            sp_mat = np.column_stack([df[f"sp_{n}"] for n in common])
+
+            prot_norm = prot_mat / (np.linalg.norm(prot_mat, axis=1, keepdims=True) + 1e-8)
+            sp_norm = sp_mat / (np.linalg.norm(sp_mat, axis=1, keepdims=True) + 1e-8)
+
+            df['global_cosine_similarity'] = np.sum(prot_norm * sp_norm, axis=1)
+            df['global_euclidean_distance'] = -np.linalg.norm(prot_mat - sp_mat, axis=1)
+
+            interaction_features += ['global_cosine_similarity', 'global_euclidean_distance']
+
+    # ===== FEATURE LIST =====
+    all_features = proba_cols + non_proba_sp_cols + prot_feature_cols + interaction_features
+
+    print(f"\n📊 Initial features: {len(all_features)}")
+
+    # Remove constant features
+    valid_feats = [c for c in all_features if c in df.columns and df[c].nunique() > 1]
+    print(f"🧹 Non-constant features: {len(valid_feats)}")
+
+    # ===== MERGE CLUSTERS + CREATE FOLDS =====
+    df = df.merge(df_clusters, on='Author-Protein', how='left')
+
+    df = create_cluster_folds(df, n_folds=5)
+
+    # ===== CLUSTER-AWARE FEATURE SELECTION =====
+    if len(valid_feats) > max_features:
+        print(f"\n🔬 Cluster-aware feature selection ({len(valid_feats)} → {max_features})")
+
+        X = df[valid_feats].values
+        y = df['relevance'].values
+
+        importance_acc = np.zeros(len(valid_feats))
+
+        for fold in range(5):
+            print(f"  Fold {fold+1}/5")
+
+            train_mask = df["fold"] != fold
+
+            X_train = X[train_mask]
+            y_train = y[train_mask]
+
+            model = xgb.XGBRegressor(
+                n_estimators=500,
+                max_depth=8,
+                learning_rate=0.1,
+                random_state=42,
+                n_jobs=-1
+            )
+
+            model.fit(X_train, y_train)
+
+            importance_acc += model.feature_importances_
+
+        importance_avg = importance_acc / 5
+
+        top_idx = np.argsort(importance_avg)[-max_features:]
+        selected_features = [valid_feats[i] for i in top_idx]
+
+        print(f"📊 Importance range: [{importance_avg.min():.4f}, {importance_avg.max():.4f}]")
+
+    else:
+        selected_features = valid_feats
+        print(f"\n📊 Keeping all {len(selected_features)} features")
+
+    # ===== FINAL CLEANUP =====
+    final_features = [c for c in selected_features if df[c].nunique() > 1]
+
+    print(f"\n✅ FINAL FEATURE COUNT: {len(final_features)}")
+
+    return df, final_features, cfg
 
 def create_cluster_folds(df, n_folds=5):
     """
@@ -338,7 +295,55 @@ def create_cluster_folds(df, n_folds=5):
     
     return df
 
+def cross_validated_feature_selection_cluster(df, feature_names,
+                                              target_col='relevance',
+                                              n_folds=5,
+                                              max_features=1000,
+                                              random_state=42):
+    """
+    Cluster-aware cross-validated feature selection (NO leakage)
+    Uses precomputed 'fold' column
+    """
+    import numpy as np
+    import xgboost as xgb
+    
+    X_all = df[feature_names].values
+    y_all = df[target_col].values
+    
+    feature_importance_accumulator = np.zeros(len(feature_names))
+    
+    print(f"\n🔁 Running {n_folds}-fold CLUSTER-AWARE CV for feature selection...")
 
+    for fold in range(n_folds):
+        print(f"  Fold {fold+1}/{n_folds}")
+        
+        train_mask = df["fold"] != fold
+        
+        X_train = X_all[train_mask]
+        y_train = y_all[train_mask]
+        
+        model = xgb.XGBRegressor(
+            n_estimators=500,
+            max_depth=8,
+            learning_rate=0.1,
+            random_state=random_state,
+            n_jobs=-1
+        )
+        
+        model.fit(X_train, y_train)
+        
+        feature_importance_accumulator += model.feature_importances_
+
+    # Average importance
+    avg_importance = feature_importance_accumulator / n_folds
+    
+    # Select top features
+    top_indices = np.argsort(avg_importance)[-max_features:]
+    selected_features = [feature_names[i] for i in top_indices]
+    
+    print(f"\n📊 Importance range: [{avg_importance.min():.4f}, {avg_importance.max():.4f}]")
+    
+    return selected_features, avg_importance
 
 def evaluate_ranking(y_true_grouped, y_score_grouped, k=None):
     ndcg_scores = []
@@ -410,12 +415,10 @@ def analyze_per_protein_performance(df_fold, y_true, y_pred_scores, protein_col=
         prot_true = protein_data['true_relevance'].values
         prot_pred = protein_data['pred_score'].values
         n_samples = len(prot_true)
-        n_positives = prot_true.sum()
         
-        if n_positives == 0:
-            # Skip proteins with no positives in test set
-            continue
-            
+        # For continuous relevance, we don't need to check n_positives > 0
+        # We can evaluate ranking even if all values are low
+        
         # Calculate NDCG at various k
         ndcg_1 = ndcg_score([prot_true], [prot_pred], k=1) if n_samples >= 1 else 0
         ndcg_3 = ndcg_score([prot_true], [prot_pred], k=3) if n_samples >= 3 else ndcg_1
@@ -428,15 +431,28 @@ def analyze_per_protein_performance(df_fold, y_true, y_pred_scores, protein_col=
         except:
             spearman_corr, spearman_p = 0, 1.0
         
-        # Calculate if top prediction is positive
-        top_idx = np.argmax(prot_pred)
-        top_is_positive = prot_true[top_idx] == 1
+        # For continuous relevance, we can also calculate:
+        # - Pearson correlation (linear relationship)
+        # - MSE/MAE between normalized scores
+        try:
+            from scipy.stats import pearsonr
+            pearson_corr, pearson_p = pearsonr(prot_true, prot_pred)
+        except:
+            pearson_corr, pearson_p = 0, 1.0
         
-        # Calculate reciprocal rank
+        # Calculate if top prediction has highest true relevance
+        top_idx = np.argmax(prot_pred)
+        top_true_value = prot_true[top_idx]
+        max_true_value = prot_true.max()
+        top_is_best = abs(top_true_value - max_true_value) < 1e-6
+        
+        # Calculate reciprocal rank based on threshold
+        # For continuous, we can define "relevant" as top 25% or above median
+        threshold = np.percentile(prot_true, 75) if len(prot_true) > 3 else prot_true.max() * 0.8
         sorted_indices = np.argsort(prot_pred)[::-1]
         reciprocal_rank = 0
         for rank, idx in enumerate(sorted_indices, 1):
-            if prot_true[idx] == 1:
+            if prot_true[idx] >= threshold:
                 reciprocal_rank = 1.0 / rank
                 break
         
@@ -444,15 +460,17 @@ def analyze_per_protein_performance(df_fold, y_true, y_pred_scores, protein_col=
             'fold': fold_i,
             'protein': protein,
             'n_samples': n_samples,
-            'n_positives': n_positives,
-            'positive_ratio': n_positives / n_samples if n_samples > 0 else 0,
+            'true_mean': prot_true.mean(),
+            'true_std': prot_true.std(),
             'ndcg_1': ndcg_1,
             'ndcg_3': ndcg_3,
             'ndcg_5': ndcg_5,
             'ndcg_10': ndcg_10,
             'spearman': spearman_corr,
             'spearman_p': spearman_p,
-            'top_is_positive': top_is_positive,
+            'pearson': pearson_corr,
+            'pearson_p': pearson_p,
+            'top_is_best': top_is_best,
             'reciprocal_rank': reciprocal_rank
         })
     
@@ -471,16 +489,17 @@ def print_protein_summary(protein_df, top_n=10):
     best = protein_df.nlargest(min(top_n, len(protein_df)), 'ndcg_5')
     for _, row in best.iterrows():
         print(f"  {row['protein']}: NDCG@5={row['ndcg_5']:.3f}, "
-              f"pos={int(row['n_positives'])}/{int(row['n_samples'])}, "
-              f"RR={row['reciprocal_rank']:.3f}")
+              f"n={int(row['n_samples'])}, "
+              f"Spearman={row['spearman']:.3f}")
     
     print(f"\n❌ Worst performing proteins (NDCG@5):")
     worst = protein_df.nsmallest(min(top_n, len(protein_df)), 'ndcg_5')
     for _, row in worst.iterrows():
         print(f"  {row['protein']}: NDCG@5={row['ndcg_5']:.3f}, "
-              f"pos={int(row['n_positives'])}/{int(row['n_samples'])}, "
-              f"RR={row['reciprocal_rank']:.3f}")
+              f"n={int(row['n_samples'])}, "
+              f"Spearman={row['spearman']:.3f}")
     
     # Correlation with sample size
-    print(f"\n📈 Correlation between #positives and NDCG@5: "
-          f"{protein_df['n_positives'].corr(protein_df['ndcg_5']):.3f}")
+    if 'n_samples' in protein_df.columns and 'ndcg_5' in protein_df.columns:
+        print(f"\n📈 Correlation between sample size and NDCG@5: "
+              f"{protein_df['n_samples'].corr(protein_df['ndcg_5']):.3f}")
